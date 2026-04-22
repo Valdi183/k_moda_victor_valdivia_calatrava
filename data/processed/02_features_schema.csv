@@ -1,0 +1,36 @@
+Feature,Descripción
+semana_inicio,datetime — identificador temporal
+ciudad,categoría — identificador de mercado
+split,train / test — partición temporal
+ventas_eur,TARGET — ventas netas sin IVA (€)
+log_ventas_eur,TARGET log — log(ventas_eur)
+inv_paid_search_transformed,"Media — paid search (adstock+Hill, escala [0,1])"
+inv_social_paid_transformed,"Media — social paid (adstock+Hill, escala [0,1])"
+inv_display_transformed,"Media — display (adstock+Hill, escala [0,1])"
+inv_video_online_transformed,"Media — video online (adstock+Hill, escala [0,1])"
+inv_email_crm_transformed,"Media — email crm (adstock+Hill, escala [0,1])"
+inv_exterior_transformed,"Media — exterior (adstock+Hill, escala [0,1])"
+inv_radio_local_transformed,"Media — radio local (adstock+Hill, escala [0,1])"
+inv_prensa_transformed,"Media — prensa (adstock+Hill, escala [0,1])"
+log_trend,"Control — tendencia log-normalizada [0,1]"
+sin_1,Control — término Fourier (estacionalidad)
+cos_1,Control — término Fourier (estacionalidad)
+sin_2,Control — término Fourier (estacionalidad)
+cos_2,Control — término Fourier (estacionalidad)
+sin_3,Control — término Fourier (estacionalidad)
+cos_3,Control — término Fourier (estacionalidad)
+flag_rebajas,Control — flag calendario binario
+flag_black_friday,Control — flag calendario binario
+flag_navidad,Control — flag calendario binario
+flag_semana_santa,Control — flag calendario binario
+flag_payday,Control — flag calendario binario
+flag_festivo,Control — flag calendario binario
+flag_vacaciones_escolares,Control — flag calendario binario
+flag_incidencia_ecommerce,Control — flag calendario binario
+temperatura_media_z,Control — variable de entorno (z-score)
+lluvia_media_z,Control — variable de entorno (z-score)
+turismo_indice_medio_z,Control — variable de entorno (z-score)
+ciudad_bilbao,Control — dummy de ciudad (ref=Barcelona)
+ciudad_madrid,Control — dummy de ciudad (ref=Barcelona)
+ciudad_sevilla,Control — dummy de ciudad (ref=Barcelona)
+ciudad_valencia,Control — dummy de ciudad (ref=Barcelona)
