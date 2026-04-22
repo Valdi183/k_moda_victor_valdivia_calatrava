@@ -1,3 +1,2 @@
-*.csv
-Caso_2_IA/src/__pycache__/
-Caso_2_IA/.vscode/
+data/raw/*.csv
+.vscode/
