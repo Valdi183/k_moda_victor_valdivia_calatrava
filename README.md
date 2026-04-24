@@ -1,135 +1,155 @@
 # K-Moda — Marketing Mix Model (MMM)
 
-> **¿Cuánto vale realmente cada euro invertido en publicidad?**
-> Este proyecto construye un modelo estadístico que responde exactamente esa pregunta para K-Moda, una cadena de moda con presencia en 10 ciudades de España.
+> Proyecto de modelado estadístico para la estimación de la contribución de medios publicitarios a las ventas de una cadena de moda española, con implementación de un simulador de optimización presupuestaria.
 
 ---
 
-## El problema de negocio
+## Descripción del proyecto
 
-K-Moda invierte anualmente más de **15 millones de euros** en 8 canales de publicidad: Paid Search, Social Paid, Display, Video Online, Email/CRM, Exterior, Radio Local y Prensa.
+El presente proyecto desarrolla un **Marketing Mix Model (MMM)** aplicado a K-Moda, una cadena de moda con presencia en 10 ciudades de España. El objetivo es cuantificar el efecto de cada canal publicitario sobre las ventas semanales, teniendo en cuenta que dicho efecto no es ni inmediato ni lineal.
 
-Hasta ahora, la empresa no disponía de ninguna herramienta que le permitiese responder preguntas como:
+Se trabaja con datos históricos de 5 años (2020–2024) a granularidad semanal y nivel de ciudad, lo que constituye un panel de **2.610 observaciones**. A partir de ellos se estima un modelo de regresión con regularización que permite:
 
-- ¿Cuántas ventas genera cada canal de forma aislada?
-- ¿Estamos invirtiendo demasiado en canales poco eficientes?
-- Si el CFO nos recorta el presupuesto un 20%, ¿dónde deberíamos recortar para perder el mínimo de ventas?
-- ¿Cuál sería el reparto óptimo de un presupuesto de 12M€?
-
----
-
-## ¿Qué es un Marketing Mix Model?
-
-Un **Marketing Mix Model (MMM)** es un modelo de regresión que descompone las ventas en sus causas: ¿cuánto se explica por la publicidad, por la estacionalidad, por los eventos especiales, por el contexto económico...?
-
-La dificultad está en que la publicidad no funciona de forma instantánea ni lineal:
-- Una valla publicitaria vista hoy puede generar una venta dentro de tres semanas (**efecto memoria**)
-- Doblar la inversión en un canal no dobla las ventas (**rendimientos decrecientes**)
-
-El MMM modela ambos efectos matemáticamente para obtener estimaciones fiables y defendibles ante el equipo directivo.
+- Atribuir a cada canal su contribución al volumen de ventas
+- Calcular el ROI marginal de cada euro invertido en publicidad
+- Simular escenarios alternativos de distribución presupuestaria
+- Obtener la asignación óptima de un presupuesto dado
 
 ---
 
-## Datos utilizados
+## Motivación
 
-| Fuente | Descripción |
+El principal reto de un MMM es que la publicidad presenta dos propiedades que dificultan su modelado directo:
+
+1. **Efecto memoria (adstock):** el impacto de una inversión publicitaria no se agota en la semana en que se realiza, sino que decae gradualmente en semanas posteriores
+2. **Rendimientos decrecientes (saturación):** la relación entre inversión y ventas no es lineal; a partir de cierto nivel, cada euro adicional genera un retorno marginal menor
+
+Sin modelar estas dos propiedades, los coeficientes de regresión resultan sesgados e inútiles para la toma de decisiones. El presente proyecto propone un pipeline de transformación que aborda ambos efectos antes de la estimación del modelo.
+
+Adicionalmente, un problema clásico en MMM es la aparición de coeficientes negativos en canales de medios cuando estos están correlacionados entre sí. Se propone una arquitectura de dos etapas que resuelve este problema imponiendo restricciones de signo únicamente sobre los canales de medios.
+
+---
+
+## Datos
+
+| Fichero | Descripción |
 |---|---|
-| `ventas_lineas.csv` | Ventas semanales por ciudad y línea de producto |
-| `inversion_medios_semanal.csv` | Inversión por canal y ciudad (2020–2024) |
-| `trafico_tienda_web_diario.csv` | Sesiones web y visitas a tienda |
-| `calendario_ciudad.csv` | Festivos, rebajas, Black Friday, Navidad, Semana Santa |
+| `ventas_lineas.csv` | Ventas a nivel de línea de pedido (ciudad, semana, producto) |
+| `inversion_medios_semanal.csv` | Inversión semanal por canal y ciudad (2020–2024) |
+| `trafico_tienda_web_diario.csv` | Sesiones web y visitas a tienda física |
+| `calendario_ciudad.csv` | Variables de calendario: festivos, rebajas, Black Friday, Navidad |
 | `clientes.csv` / `pedidos.csv` | Datos transaccionales para variables de control |
 
-**Estructura del panel de datos:** 10 ciudades × 261 semanas = **2.610 observaciones**  
+**Estructura del panel:** 10 ciudades × 261 semanas = 2.610 filas  
 **Periodo:** enero 2020 — diciembre 2024  
-**Ciudades:** Barcelona, Madrid, Valencia, Sevilla, Bilbao, Zaragoza, Málaga, Murcia, Palma, A Coruña
+**Ciudades:** Barcelona, Madrid, Valencia, Sevilla, Bilbao, Zaragoza, Málaga, Murcia, Palma, A Coruña  
+**Canales de medios:** Paid Search, Social Paid, Display, Video Online, Email/CRM, Exterior, Radio Local, Prensa
 
 ---
 
-## Pipeline del modelo
+## Metodología
 
-El proyecto sigue un pipeline en 4 etapas:
+El proyecto se estructura en cuatro notebooks que deben ejecutarse en orden:
 
-### 1. Exploración (NB01)
-Análisis exploratorio de las series temporales de ventas e inversión por ciudad y canal. Identificación de estacionalidad, outliers y correlaciones preliminares.
+### NB01 — Análisis exploratorio (EDA)
 
-### 2. Feature Engineering (NB02)
-Transformación de las inversiones brutas en variables explicativas del modelo mediante dos pasos:
+Análisis univariado y multivariado de las series temporales de ventas e inversión. Se estudia la estacionalidad, los efectos de calendario, la distribución de la variable objetivo y las correlaciones preliminares con y sin lag entre inversión y ventas.
 
-**Adstock geométrico** — modela el efecto memoria de la publicidad:
+### NB02 — Feature Engineering
 
-```
-A_t = inversión_t + λ × A_{t-1}
-```
+Transformación de la inversión bruta en variables explicativas para el modelo mediante el siguiente pipeline:
 
-Cada canal tiene su propio decay (λ) calibrado por correlación detrended con ventas dentro de rangos económicamente razonables por tipo de canal:
+**Paso 1: Adstock geométrico**
 
-| Canal | Decay (λ) | Interpretación |
-|---|---|---|
-| Exterior | 0.75 | Memoria larga (vallas duran semanas) |
-| Radio / Display / Video | 0.65 | Memoria media |
-| Paid Search / Social | 0.50–0.60 | Memoria media-corta |
-| Email / CRM | 0.35 | Efecto casi inmediato |
+$$A_t = x_t + \lambda \cdot A_{t-1}, \quad \lambda \in [0, 1)$$
 
-**Saturación Hill** — modela rendimientos decrecientes:
+donde $\lambda$ es la tasa de retención calibrada por canal mediante un grid search con correlación detrended sobre el conjunto de entrenamiento. Se imponen restricciones por tipo de canal para evitar que el algoritmo capture la tendencia de ventas en lugar de la memoria publicitaria:
 
-```
-f(x) = x^S / (K^S + x^S)
-```
+| Canal | Rango de búsqueda $\lambda$ |
+|---|---|
+| Exterior | [0.30, 0.75] |
+| Radio / Display / Video | [0.20, 0.65] |
+| Paid Search / Social | [0.00, 0.60] |
+| Email / CRM | [0.00, 0.35] |
 
-Donde K es el punto de media saturación y S controla la forma de la curva. Evita que el modelo asuma que doblar la inversión dobla las ventas.
+**Paso 2: Saturación Hill**
 
-### 3. Modelado (NB03)
-Arquitectura de **dos etapas** para garantizar coeficientes con sentido económico:
+$$f(A_t) = \frac{A_t^S}{K^S + A_t^S}$$
 
-- **Etapa 1 — Ridge** sobre variables de control (estacionalidad, festivos, clima, turismo, dummies de ciudad): sin restricción de signo, captura el contexto externo
-- **Etapa 2 — ElasticNet con coeficientes positivos** sobre variables de medios: fuerza que todos los canales tengan efecto ≥ 0 en ventas, evitando los coeficientes negativos que aparecen en modelos sin restricción cuando los canales están correlacionados entre sí
+donde $K$ es el punto de media saturación (estimado como la mediana del adstock por canal) y $S = 2$ para todos los canales, lo que produce una curva en S con inflexión en $K$.
 
-La validación se realiza con **TimeSeriesSplit** (5 folds cronológicos, nunca aleatorios) para respetar la estructura temporal de los datos.
+Además se construyen variables de control: tendencia logarítmica, componentes de Fourier para estacionalidad anual, flags de eventos de calendario y dummies de ciudad.
 
-### 4. Simulador estratégico (NB04)
-Con el modelo entrenado se construye un `BudgetSimulator` que permite tres operaciones:
+### NB03 — Modelo base
 
-1. **Simular escenarios**: dado cualquier reparto de presupuesto por canal, predice las ventas resultantes
-2. **ROI Marginal**: calcula cuántos euros de ventas adicionales genera cada euro extra invertido en cada canal
-3. **Optimización**: encuentra el reparto que maximiza las ventas predichas dado un presupuesto total, con restricciones que mantienen la solución dentro del rango histórico observado (evita extrapolación fuera de la zona calibrada del modelo)
+Se propone una arquitectura de **dos etapas** que separa el tratamiento de variables de control y de medios:
+
+**Etapa 1 — Ridge sobre controles:**
+$$\hat{y}^{(1)} = \mathbf{x}_{ctrl}^T \boldsymbol{\beta}_{ctrl}$$
+
+Sin restricción de signo, ya que las variables de control (temperatura, festivos, etc.) pueden tener efectos negativos perfectamente válidos.
+
+**Etapa 2 — ElasticNet con coeficientes positivos sobre medios:**
+$$\hat{y}^{(2)} = \mathbf{x}_{media}^T \boldsymbol{\beta}_{media}, \quad \beta_{media,j} \geq 0 \; \forall j$$
+
+La restricción de positividad garantiza que ningún canal presente un efecto negativo en ventas, lo que es una condición necesaria para que los resultados sean interpretables y económicamente coherentes.
+
+La predicción final es $\hat{y} = \hat{y}^{(1)} + \hat{y}^{(2)}$.
+
+La selección de hiperparámetros se realiza mediante **TimeSeriesSplit con 5 folds** sobre el conjunto de entrenamiento (nunca validación cruzada aleatoria, que rompería la estructura temporal).
+
+### NB04 — Simulador estratégico
+
+Con el modelo entrenado se implementa la clase `BudgetSimulator` que opera de la siguiente forma:
+
+1. Dado un presupuesto por canal $\{b_1, \ldots, b_8\}$, escala el adstock histórico proporcionalmente: $A_t^{(nuevo)} = A_t^{(hist)} \cdot \frac{b_j}{b_j^{(actual)}}$, limitado al máximo histórico observado para no extrapolar fuera de la zona calibrada de la curva Hill.
+2. Re-aplica la transformación Hill al adstock escalado.
+3. Predice las ventas con el modelo de dos etapas.
+
+La optimización presupuestaria se formula como:
+
+$$\max_{\mathbf{b}} \; \hat{y}(\mathbf{b}) \quad \text{s.t.} \quad \sum_j b_j = B, \quad b_j \in [lo_j, hi_j]$$
+
+donde los bounds $[lo_j, hi_j]$ son asimétricos según el ROI marginal de cada canal, resolviéndose mediante SLSQP.
 
 ---
 
-## Resultados principales
+## Resultados
 
-### Contribución de cada canal a las ventas
+### Contribución de medios a las ventas (Peso%)
 
-| Canal | Peso% | Posición |
-|---|---|---|
-| Paid Search | 25.8% | 1º |
-| Exterior | 22.7% | 2º |
-| Video Online | 19.4% | 3º |
-| Radio Local | 14.4% | 4º |
-| Display | 9.4% | 5º |
-| Prensa | 6.4% | 6º |
-| Social Paid | 1.8% | 7º |
-| Email / CRM | 0.0% | 8º |
+$$\text{Peso\%}_j = \frac{\hat{\beta}_j \cdot \bar{A}_j}{\sum_k \hat{\beta}_k \cdot \bar{A}_k} \times 100$$
 
-### Conclusión estratégica
+| Canal | Peso% |
+|---|---|
+| Paid Search | 25.8% |
+| Exterior | 22.7% |
+| Video Online | 19.4% |
+| Radio Local | 14.4% |
+| Display | 9.4% |
+| Prensa | 6.4% |
+| Social Paid | 1.8% |
+| Email / CRM | 0.0% |
 
-Con un presupuesto de **12M€** redistribuido según el modelo óptimo se obtienen prácticamente las mismas ventas que con los **15.2M€** históricos. El ROI total pasa de **10.7x a 13.8x**.
+### Análisis de escenarios
 
-La palanca no es gastar más — es **redistribuir mejor**.
+| Escenario | Presupuesto | Ventas predichas | ROI |
+|---|---|---|---|
+| Histórico real | 15.2 M€ | baseline | 10.7x |
+| Reducción −20% | 12.1 M€ | −0.1% | 12.1x |
+| Óptimo (12M€) | 12.0 M€ | −0.2% | 13.8x |
+
+El resultado más relevante es que con un presupuesto un **21% inferior** al histórico, el modelo predice una caída de ventas inferior al **0.2%**, lo que implica una mejora sustancial del ROI. Esto sugiere que el mix histórico presenta ineficiencias significativas en la distribución entre canales.
 
 ---
 
 ## Dashboard interactivo
 
-El proyecto incluye un dashboard desplegado en Hugging Face Spaces que permite explorar los resultados de forma interactiva:
+Se ha desarrollado un dashboard en Streamlit desplegado en Hugging Face Spaces que permite explorar los resultados de forma interactiva:
 
 **[huggingface.co/spaces/Valdi121/MMM_project](https://huggingface.co/spaces/Valdi121/MMM_project)**
 
-El dashboard tiene 4 secciones:
-- **Resumen Ejecutivo** — KPIs y mix de inversión actual
-- **Contribución por Canal** — Peso% y ROI marginal por canal
-- **Simulador de Presupuesto** — ajusta sliders por canal y ve el impacto en ventas
-- **Optimización** — calcula el reparto óptimo para cualquier presupuesto objetivo
+El dashboard incluye cuatro secciones: resumen ejecutivo, contribución por canal con ROI marginal, simulador de presupuesto con sliders por canal, y optimización con comparativa de redistribución.
 
 ---
 
@@ -138,61 +158,63 @@ El dashboard tiene 4 secciones:
 ```
 k_moda_victor_valdivia_calatrava/
 │
-├── files/                          # Notebooks del proyecto
-│   ├── 01_EDA_MMM.ipynb            # Exploración de datos
-│   ├── 02_feature_engineering.ipynb # Adstock + Hill saturation
-│   ├── 03_modelo_mmm_base.ipynb    # Entrenamiento del modelo
-│   └── 04_simulador_estrategico.ipynb # Simulador y optimización
+├── files/                               # Notebooks del proyecto
+│   ├── 01_EDA_MMM.ipynb                 # Análisis exploratorio
+│   ├── 02_feature_engineering.ipynb     # Pipeline adstock + Hill
+│   ├── 03_modelo_mmm_base.ipynb         # Entrenamiento y validación del modelo
+│   └── 04_simulador_estrategico.ipynb   # Simulador y optimización presupuestaria
 │
 ├── data/
-│   ├── raw/                        # Datos originales sin modificar
-│   └── processed/                  # CSVs generados por los notebooks
-│       ├── 01_master_semanal.csv   # Dataset consolidado (2.610 filas)
-│       ├── 02_features_mmm.csv     # Features para el modelo (89 columnas)
-│       ├── 02_hiperparametros_medios.csv # Decays y parámetros Hill calibrados
-│       ├── 03_peso_por_canal.csv   # Contribución % de cada canal
-│       ├── 04_simulador_escenarios.csv  # Resultados de escenarios
-│       ├── 05_marginal_roi.csv     # ROI marginal por canal
-│       ├── 06_budget_redistribution.csv # Redistribución óptima
-│       ├── 07_financial_projections.csv # Proyecciones financieras
-│       └── 08_sensitivity_matrix.csv    # Análisis de sensibilidad
+│   ├── raw/                             # Datos originales sin modificar
+│   └── processed/                       # Artefactos generados por los notebooks
+│       ├── 01_master_semanal.csv        # Panel consolidado (2.610 filas × 34 cols)
+│       ├── 02_features_mmm.csv          # Features para el modelo (89 columnas)
+│       ├── 02_hiperparametros_medios.csv # Decays λ y parámetros Hill por canal
+│       ├── 03_peso_por_canal.csv        # Contribución % de cada canal
+│       ├── 04_simulador_escenarios.csv  # Resultados de escenarios simulados
+│       ├── 05_marginal_roi.csv          # ROI marginal por canal
+│       ├── 06_budget_redistribution.csv # Redistribución óptima de presupuesto
+│       ├── 07_financial_projections.csv # Proyecciones financieras por escenario
+│       └── 08_sensitivity_matrix.csv   # Análisis de sensibilidad presupuestaria
 │
 ├── models/
-│   └── mmm_elasticnet_baseline.pkl # Modelo entrenado serializado
+│   └── mmm_elasticnet_baseline.pkl     # Modelo serializado (joblib)
 │
 ├── src/
-│   └── utils_mmm.py                # Funciones compartidas (adstock, Hill, métricas)
+│   └── utils_mmm.py                    # Funciones compartidas: adstock, Hill, métricas
 │
-├── reports/figures/                # Gráficos generados por los notebooks
+├── reports/figures/                    # Gráficos generados por los notebooks
 │
-├── hf_deploy/                      # Código del dashboard (Hugging Face)
-│   ├── app.py                      # App Streamlit
+├── hf_deploy/                          # Código del dashboard (Hugging Face Spaces)
+│   ├── app.py
 │   ├── requirements.txt
-│   └── data/                       # Copia de los datos para el dashboard
+│   └── data/
 │
-└── requirements.txt                # Dependencias del proyecto
+└── requirements.txt                    # Dependencias del proyecto
 ```
 
 ---
 
-## Cómo ejecutar el proyecto
+## Reproducción de resultados
 
 ### Requisitos
+
 - Python 3.10+
-- Instalar dependencias: `pip install -r requirements.txt`
+- `pip install -r requirements.txt`
 
-### Orden de ejecución de los notebooks
+### Orden de ejecución
 
-Los notebooks deben ejecutarse en orden con **Restart Kernel and Run All Cells**:
+Los notebooks deben ejecutarse secuencialmente con **Restart Kernel and Run All Cells**:
 
 ```
-01_EDA_MMM.ipynb               → exploración, no genera artefactos
-02_feature_engineering.ipynb   → genera 02_features_mmm.csv
-03_modelo_mmm_base.ipynb       → genera mmm_elasticnet_baseline.pkl + 03_peso_por_canal.csv
-04_simulador_estrategico.ipynb → genera 04_simulador_escenarios.csv a 08_sensitivity_matrix.csv
+01_EDA_MMM.ipynb              →  exploración, sin artefactos de salida
+02_feature_engineering.ipynb  →  genera data/processed/02_features_mmm.csv
+03_modelo_mmm_base.ipynb      →  genera models/mmm_elasticnet_baseline.pkl
+04_simulador_estrategico.ipynb → genera data/processed/04_*.csv a 08_*.csv
 ```
 
-### Lanzar el dashboard en local
+### Dashboard en local
+
 ```bash
 cd hf_deploy
 pip install -r requirements.txt
@@ -206,12 +228,12 @@ streamlit run app.py
 | Categoría | Herramientas |
 |---|---|
 | Lenguaje | Python 3.12 |
-| Modelado | scikit-learn (Ridge, ElasticNet), scipy (SLSQP) |
-| Datos | pandas, numpy |
+| Modelado | scikit-learn (Ridge, ElasticNet positivo), scipy (SLSQP) |
+| Preprocesado | pandas, numpy |
 | Visualización | matplotlib, seaborn, plotly |
 | Dashboard | Streamlit |
 | Despliegue | Hugging Face Spaces |
-| Entorno | Jupyter Notebooks, VS Code |
+| Entorno de desarrollo | Jupyter Notebooks, VS Code |
 
 ---
 
